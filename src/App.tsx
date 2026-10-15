@@ -3,7 +3,7 @@ import { createAgent } from './ai/agent'
 import { sampleDocs } from './ai/documents'
 import type { SourceDoc } from './ai/documents'
 import { describeAttachments, ingestFiles } from './ai/files'
-import { quickHelp } from './ai/help'
+import { quickHelp, toolkitAnswer } from './ai/help'
 import type { Attachment } from './ai/files'
 import { learnedDoc } from './ai/ingest'
 import { createLlmAgent, DEFAULT_MODEL, OFFLINE, unloadModel } from './ai/llm'
@@ -21,6 +21,7 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { useLocalStorage } from './useLocalStorage'
 import './App.css'
 
+type Theme = 'system' | 'light' | 'dark'
 type View = 'chat' | 'toolkit' | 'knowledge' | 'models' | 'workspace'
 
 const VIEW_TITLES: Record<View, string> = {
@@ -32,6 +33,7 @@ const VIEW_TITLES: Record<View, string> = {
 }
 
 function App() {
+  const [theme, setTheme] = useLocalStorage<Theme>('acme-assistant-theme', 'system')
   const [view, setView] = useState<View>(() => {
     const hash = window.location.hash.slice(1)
     return hash in VIEW_TITLES ? (hash as View) : 'chat'
@@ -55,6 +57,13 @@ function App() {
   const offline = useMemo(() => createAgent(ctx), [ctx])
   const llm = useMemo(() => createLlmAgent(ctx), [ctx])
   const allTools = llm.tools
+
+  // Light / dark / follow-the-system: CSS reads the data-theme attribute on <html>.
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'system') delete root.dataset.theme
+    else root.dataset.theme = theme
+  }, [theme])
 
   // Keep the address bar in step with the page, so views can be bookmarked (e.g. #toolkit).
   useEffect(() => {
@@ -129,7 +138,7 @@ function App() {
         { role: 'user' as const, content: t.question + describeAttachments(t.attachments ?? []) },
         { role: 'assistant' as const, content: t.reply.text },
       ])
-      const help = attachments.length ? null : quickHelp(q)
+      const help = attachments.length ? null : (toolkitAnswer(q, allTools) ?? quickHelp(q))
       const reply = help
         ? { text: help, calls: [], sources: [] }
         : usingLlm
@@ -221,6 +230,14 @@ function App() {
       <main className="main">
         <header className="topbar">
           <h2>{VIEW_TITLES[view]}</h2>
+          <div className="topbar-right">
+            <div className="theme-switch" role="group" aria-label="Colour theme">
+              {([['light', '☀', 'Light'], ['system', '◐', 'Match system'], ['dark', '☾', 'Dark']] as const).map(([id, icon, label]) => (
+                <button key={id} type="button" className={theme === id ? 'on' : ''} title={label} aria-label={label} aria-pressed={theme === id} onClick={() => setTheme(id)}>
+                  {icon}
+                </button>
+              ))}
+            </div>
           <label className="model-pick" title="Choose which AI model answers">
             <span className={`dot ${dot}`} />
             <select value={modelId} disabled={busy} onChange={(e) => chooseModel(e.target.value)}>
@@ -234,6 +251,7 @@ function App() {
               <option value={OFFLINE}>Basic (no AI model)</option>
             </select>
           </label>
+          </div>
         </header>
         {llmStatus && <p className="banner warn">{llmStatus} - using the basic rule-based agent.</p>}
         {notice && <p className="banner ok">{notice}</p>}

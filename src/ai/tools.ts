@@ -1,4 +1,5 @@
 import { businessTools } from './tools/business'
+import { catalogTool } from './tools/catalog'
 import { companyTools } from './tools/company'
 import { dateTimeExtraTools } from './tools/datetime-extra'
 import { educationTools } from './tools/education'
@@ -33,7 +34,7 @@ export { calculate } from './tools/utility'
  * tools are shown to the model for each question, so this list can grow.
  */
 export function createTools(ctx: ToolContext): Tool[] {
-  return [
+  const all: Tool[] = [
     ...utilityTools,
     ...timeColorTools,
     ...dateTimeExtraTools,
@@ -59,4 +60,6 @@ export function createTools(ctx: ToolContext): Tool[] {
     ...webTools,
     ...webExtraTools,
   ]
+  all.push(catalogTool(() => all)) // lists the assistant's own tools, so it must see the whole list
+  return all
 }

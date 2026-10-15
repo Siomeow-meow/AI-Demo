@@ -1146,3 +1146,38 @@
 .chip.attach {
   cursor: pointer;
 }
+
+/* ---------- Theme switch ---------- */
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.theme-switch button {
+  width: 28px;
+  height: 26px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  transition: background 0.12s, color 0.12s;
+}
+
+.theme-switch button:hover {
+  color: var(--text-h);
+}
+
+.theme-switch button.on {
+  background: var(--accent-bg);
+  color: var(--accent);
+}

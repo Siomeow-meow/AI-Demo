@@ -1,3 +1,20 @@
+import { categoriesIn, listTools } from './tools/catalog'
+import type { Tool } from './tool-types'
+
+const TOOL_WORDS = /\b(tools?|tool ?kits?|tool ?sets?|capabilit(?:y|ies)|abilit(?:y|ies)|functions|features|commands)\b/
+const LIST_WORDS = /\b(list|show|what|which|all|every|give|tell|enumerate|display|available|have|got|offer|include|name)\b/
+
+/** Instant, complete answer to "what tools / toolkits do you have?" (optionally for one category), straight from the registry. */
+export function toolkitAnswer(question: string, tools: Tool[]): string | null {
+  const q = question.toLowerCase()
+  const asksWhatYouCanDo = /\bwhat (can|do) you (do|offer|have)\b|\bwhat are you able to\b|\byour (skills|abilities|capabilities)\b/.test(q)
+  if (q.includes('[attached files')) return null
+  if (!asksWhatYouCanDo && !(TOOL_WORDS.test(q) && LIST_WORDS.test(q))) return null
+  const cats = [...new Set(tools.map((t) => t.category))]
+  const mentioned = categoriesIn(question, cats)
+  return listTools(tools, { categories: mentioned })
+}
+
 const CAPABILITY = /\b(can|could|may|is it possible|able to|how (do|can|to|would)|do you (accept|support|take|read|handle)|does it (accept|support))\b/
 const SEND = /\b(send|sending|upload|uploading|attach|attaching|import|importing|give|share|add|load|feed|provide|submit|accept|support|read|handle|open|take)\b/
 const THING = /\b(data|files?|documents?|docs?|csv|excel|xlsx|spreadsheets?|pdfs?|word|docx|powerpoint|pptx|json|tables?|reports?)\b/

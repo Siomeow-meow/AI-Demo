@@ -21,6 +21,7 @@ export const TOOL_EXAMPLES: Record<string, string> = {
   // Knowledge
   search_knowledge_base: 'How many vacation days do I get?',
   read_document: 'List the available documents',
+  list_tools: 'What tools do you have for networking?',
   summarize_document: 'Summarize the leave policy',
   // Company data
   lookup_employee: 'Who is Maria Santos?',
