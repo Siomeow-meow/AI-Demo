@@ -1,0 +1,310 @@
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100svh;
+  box-sizing: border-box;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+header h1 {
+  font-size: 22px;
+}
+
+header p {
+  font-size: 14px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.badge.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.notice {
+  font-size: 13px;
+  color: var(--warn);
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 800px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 200px 1fr;
+  }
+}
+
+aside,
+.chat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+aside {
+  overflow-y: auto;
+}
+
+nav {
+  display: flex;
+  gap: 4px;
+}
+
+nav button {
+  flex: 1;
+  padding: 5px 6px;
+  font-size: 13px;
+}
+
+nav button.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.hint {
+  font-size: 13px;
+}
+
+.upload {
+  font-size: 14px;
+  text-align: center;
+  padding: 8px;
+  border: 1px dashed var(--accent-border);
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+aside ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+aside li {
+  display: grid;
+  gap: 1px;
+  font-size: 13px;
+}
+
+aside li strong {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.link {
+  justify-self: start;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.prio {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.prio.high {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding-right: 4px;
+}
+
+.welcome {
+  display: grid;
+  gap: 14px;
+}
+
+.welcome h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chips button {
+  font-size: 13px;
+  border-radius: 999px;
+}
+
+.turn {
+  display: grid;
+  gap: 8px;
+}
+
+.q {
+  justify-self: end;
+  max-width: 80%;
+  background: var(--accent-bg);
+  color: var(--text-h);
+  padding: 8px 12px;
+  border-radius: 12px 12px 2px 12px;
+}
+
+.a {
+  max-width: 90%;
+  display: grid;
+  gap: 6px;
+}
+
+.a > p {
+  white-space: pre-wrap;
+  color: var(--text-h);
+}
+
+.call {
+  font-size: 13px;
+}
+
+.call summary {
+  cursor: pointer;
+}
+
+.call pre {
+  background: var(--code-bg);
+  padding: 8px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sources span {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+}
+
+form {
+  display: flex;
+  gap: 8px;
+}
+
+form input {
+  flex: 1;
+}
+
+aside h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 6px 0;
+}
+
+.toggle {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  align-items: flex-start;
+}
+
+li.off {
+  opacity: 0.5;
+}
+
+.offered {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.save {
+  justify-self: start;
+  font-size: 13px;
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.dataset {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dataset strong {
+  color: var(--text-h);
+}
+
+label.link {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+}
