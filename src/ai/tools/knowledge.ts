@@ -1,9 +1,27 @@
 import { retrieveHybrid } from '../rag'
+import type { Hit } from '../rag'
 import type { Tool, ToolContext } from '../tool-types'
 import { searchAllData } from './fuzzy'
 
 /** Models sometimes pass the text "null" for an optional argument. */
 const clean = (v: string | undefined) => (v && !/^(null|undefined|none|all|n\/a)$/i.test(v.trim()) ? v : undefined)
+
+/**
+ * Search the documents, forgiving of small-model mistakes: the two arguments may be swapped or one
+ * left empty, and a document filter that matches nothing is dropped. Used by the tool and by the
+ * source list shown under answers, so both always agree.
+ */
+export async function smartRetrieve(
+  ctx: Pick<ToolContext, 'index' | 'semantic'>,
+  query: string | undefined,
+  document: string | undefined,
+): Promise<{ hits: Hit[]; q: string }> {
+  const q = query?.trim() ? query : (document ?? '')
+  const doc = clean(document)
+  let hits = await retrieveHybrid(ctx.index, q, { semantic: ctx.semantic, document: doc })
+  if (!hits.length && doc) hits = await retrieveHybrid(ctx.index, q, { semantic: ctx.semantic })
+  return { hits, q }
+}
 
 export function knowledgeTools({ index, docs, semantic }: ToolContext): Tool[] {
   return [
@@ -19,10 +37,7 @@ export function knowledgeTools({ index, docs, semantic }: ToolContext): Tool[] {
       },
       match: (query) => ({ query }),
       run: async ({ query, document }) => {
-        // Small models sometimes swap the two arguments or leave the query empty, so be forgiving.
-        const q = query?.trim() ? query : (document ?? '')
-        let hits = await retrieveHybrid(index, q, { semantic, document: clean(document) })
-        if (!hits.length && clean(document)) hits = await retrieveHybrid(index, q, { semantic })
+        const { hits, q } = await smartRetrieve({ index, semantic }, query, document)
         if (!hits.length) {
           // Small models often reach for this tool first, so also look through the company data before giving up.
           const rows = searchAllData(q)

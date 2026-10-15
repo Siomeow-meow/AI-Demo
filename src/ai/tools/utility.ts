@@ -127,7 +127,7 @@ export const utilityTools: Tool[] = [
     category: 'Math & utility',
     description: 'Evaluate an arithmetic expression, e.g. "12 * (3 + 4)". Use for any maths or percentages.',
     keywords: 'math calculate compute plus minus times divide percent percentage sum total multiply',
-    trigger: /\d\s*%|\d\s*[-+*/^x×÷]\s*\d|percent/i,
+    trigger: /\d\s*%|(?<![\d.])\d+\s*[-+*/^x×÷]\s*\d|percent/i,
     parameters: { expr: { type: 'string', description: 'Arithmetic expression using + - * / % ^ and parentheses, e.g. 0.15*48000' } },
     match: (m) => {
       const expr = m.match(/[\d(][\d\s+\-*/%^().xX]*[\d)]/)?.[0]

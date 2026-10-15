@@ -1,7 +1,13 @@
+import { businessTools } from './tools/business'
 import { companyTools } from './tools/company'
 import { datasetTools } from './tools/datasets'
+import { erpTools } from './tools/erp'
 import { financeTools } from './tools/finance'
+import { financeExtraTools } from './tools/finance-extra'
+import { itTools } from './tools/it'
 import { knowledgeTools } from './tools/knowledge'
+import { networkingTools } from './tools/networking'
+import { posTools } from './tools/pos'
 import { textTools } from './tools/text'
 import { textExtraTools } from './tools/text-extra'
 import { timeColorTools } from './tools/time-color'
@@ -28,7 +34,13 @@ export function createTools(ctx: ToolContext): Tool[] {
     ...knowledgeTools(ctx),
     ...companyTools,
     ...datasetTools,
+    ...erpTools,
+    ...posTools,
+    ...businessTools,
     ...financeTools,
+    ...financeExtraTools,
+    ...itTools,
+    ...networkingTools,
     ...workspaceTools,
     ...webTools,
     ...webExtraTools,

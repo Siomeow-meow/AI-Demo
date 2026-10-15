@@ -1,41 +1,85 @@
 import type { Message, ToolCall as OllamaToolCall } from 'ollama/browser'
 import { ollama } from './ollama'
-import { retrieveHybrid, toSources } from './rag'
+import { toSources } from './rag'
 import type { Source } from './rag'
 import { selectTools } from './router'
 import { createTools } from './tools'
+import { smartRetrieve } from './tools/knowledge'
 import type { ToolCall, ToolContext } from './tools'
 import type { AgentReply } from './agent'
 
-// Override with VITE_OLLAMA_MODEL in .env.local, e.g. VITE_OLLAMA_MODEL=qwen2.5:3b
-export const MODEL: string = import.meta.env.VITE_OLLAMA_MODEL ?? 'qwen2.5:3b'
+/** The model used for a reply. Built from what Ollama reports about each installed model. */
+export interface ModelOption {
+  /** Ollama model tag, as used by `ollama pull`. */
+  id: string
+  /** Qwen3.x-style models "think" before answering; we switch that off to keep replies fast. */
+  thinking: boolean
+  /** Models without tool support still chat, but cannot use the tools. */
+  tools: boolean
+}
+
+/** Starting model; override with VITE_OLLAMA_MODEL in .env.local. Switch any time from the header. */
+export const DEFAULT_MODEL: string = import.meta.env.VITE_OLLAMA_MODEL ?? 'qwen2.5:3b'
+
+/** Picker value that turns the AI model off and uses the basic rule-based agent. */
+export const OFFLINE = 'offline'
+
+/** Ideas shown in the Models tab. Any tag from the Ollama library can also be typed in. */
+export const SUGGESTED_MODELS = [
+  { id: 'qwen2.5:3b', note: '1.9 GB, fast, good at tools' },
+  { id: 'llama3.2:3b', note: '2 GB, small and quick' },
+  { id: 'qwen2.5:7b', note: '4.7 GB, smarter, needs more RAM' },
+  { id: 'qwen3.5:9b', note: '5.6 GB, tight on 8 GB RAM' },
+]
 
 export interface ChatMsg {
   role: 'user' | 'assistant'
   content: string
 }
 
-/** Resolves null if the Ollama server is reachable and the model is pulled, else a problem description. */
-export async function checkModel(): Promise<string | null> {
+/** Ask Ollama to free a model from RAM right away (used when switching models). */
+export async function unloadModel(id: string): Promise<void> {
   try {
-    const { models } = await ollama.list()
-    return models.some((m) => m.name === MODEL) ? null : `Model not found. Run: ollama pull ${MODEL}`
+    await ollama.chat({ model: id, messages: [], keep_alive: 0 })
   } catch {
-    return 'Ollama is not running at http://127.0.0.1:11434'
+    /* not loaded, or Ollama is down: nothing to free */
   }
 }
 
-function systemPrompt(docTitles: string[]) {
+const AREAS: Record<string, string> = {
+  erp: 'ERP',
+  pos: 'POS',
+  biz: 'business',
+  fin: 'finance',
+  it: 'IT',
+  net: 'networking',
+  gen: 'general skills',
+}
+
+/** A short description of the knowledge base: lesson areas plus other document titles (kept brief for small models). */
+function describeDocs(docs: ToolContext['docs']): string {
+  const areas = new Set<string>()
+  const other: string[] = []
+  for (const d of docs) {
+    const prefix = d.id.split('-')[0]
+    if (d.id.includes('-') && AREAS[prefix]) areas.add(AREAS[prefix])
+    else other.push(d.title)
+  }
+  const shown = other.slice(0, 12).join('; ')
+  return `Lessons and guides on: ${[...areas].join(', ')}. Other documents: ${shown}${other.length > 12 ? ` and ${other.length - 12} more` : ''}.`
+}
+
+function systemPrompt(docs: ToolContext['docs']) {
   return `You are Acme Assistant, a helpful, knowledgeable assistant for Acme Corp employees. Be concise and professional.
 - Use the provided tools whenever they fit the request. Never invent tool results, employee, stock, sales or policy data; if a tool finds nothing, say so.
 - People, products, stock, sales and imported data tables: use the data tools (lookup_employee, check_inventory, sales_summary, query_dataset, aggregate_dataset), not the knowledge base.
-- For policies, procedures, IT help and company knowledge, search the knowledge base first and cite passages like [leave-policy#1]. Documents: ${docTitles.join('; ')}.
+- For policies, procedures, IT help and company knowledge, search the knowledge base first and cite passages like [leave-policy#1]. ${describeDocs(docs)}
 - Greetings and general-knowledge questions can be answered directly without tools.`
 }
 
 export function createLlmAgent(ctx: ToolContext) {
   const tools = createTools(ctx)
-  const system = systemPrompt(ctx.docs.map((d) => d.title))
+  const system = systemPrompt(ctx.docs)
 
   /**
    * `onText` receives the full answer text so far, for live streaming in the UI.
@@ -47,6 +91,7 @@ export function createLlmAgent(ctx: ToolContext) {
     question: string,
     onText: (text: string) => void,
     allowNetwork: boolean,
+    model: ModelOption,
   ): Promise<AgentReply> {
     const offeredTools = selectTools(
       tools.filter((t) => allowNetwork || !t.network),
@@ -78,10 +123,11 @@ export function createLlmAgent(ctx: ToolContext) {
 
     for (let step = 0; step < 5; step++) {
       const stream = await ollama.chat({
-        model: MODEL,
+        model: model.id,
         messages,
-        tools: schemas,
+        ...(model.tools ? { tools: schemas } : {}),
         stream: true,
+        ...(model.thinking ? { think: false } : {}),
         keep_alive: '5m', // unload the model from RAM after 5 idle minutes
         options: { num_ctx: 4096 },
       })
@@ -96,7 +142,7 @@ export function createLlmAgent(ctx: ToolContext) {
         if (part.message.tool_calls) requested.push(...part.message.tool_calls)
       }
 
-      if (!requested.length) return { text: content, calls, sources: [...sources.values()], offered }
+      if (!requested.length) return { text: content, calls, sources: [...sources.values()], offered, model: model.id }
 
       onText('')
       messages.push({ role: 'assistant', content, tool_calls: requested })
@@ -116,13 +162,13 @@ export function createLlmAgent(ctx: ToolContext) {
         }
         calls.push({ tool: c.function.name, args, result })
         if (c.function.name === 'search_knowledge_base') {
-          const hits = await retrieveHybrid(ctx.index, args.query ?? '', { semantic: ctx.semantic, document: args.document })
+          const { hits } = await smartRetrieve(ctx, args.query, args.document)
           for (const s of toSources(hits)) sources.set(s.id, s)
         }
         messages.push({ role: 'tool', tool_name: c.function.name, content: result })
       }
     }
-    return { text: 'Stopped after too many tool steps.', calls, sources: [...sources.values()], offered }
+    return { text: 'Stopped after too many tool steps.', calls, sources: [...sources.values()], offered, model: model.id }
   }
 
   return { tools, respond }

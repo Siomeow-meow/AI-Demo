@@ -9,6 +9,8 @@ export interface AgentReply {
   sources: Source[]
   /** Names of the tools the router offered to the model for this question. */
   offered?: string[]
+  /** Ollama model that wrote the answer (absent for the basic rule-based agent). */
+  model?: string
 }
 
 /** Pick the sentences from a chunk that best overlap with the query. */

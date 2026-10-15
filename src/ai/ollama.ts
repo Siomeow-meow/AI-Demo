@@ -37,3 +37,49 @@ export async function buildSemantic(chunks: Chunk[]): Promise<Semantic> {
   const vectors = new Map(chunks.map((c) => [c.id, cache.get(key(c))!] as const))
   return { vectors, embedQuery: async (q) => (await embed([`search_query: ${q}`]))[0] }
 }
+
+export interface InstalledModel {
+  name: string
+  sizeGB: number
+  /** Supports tool calling. */
+  tools: boolean
+  /** "Thinks" before answering (we turn that off to keep replies fast). */
+  thinking: boolean
+}
+
+/** Chat models installed in Ollama (embedding models are left out), or null if Ollama is not reachable. */
+export async function listChatModels(): Promise<InstalledModel[] | null> {
+  try {
+    const { models } = await ollama.list()
+    const detailed = await Promise.all(
+      models.map(async (m) => {
+        let caps: string[] = []
+        try {
+          caps = (await ollama.show({ model: m.name })).capabilities ?? []
+        } catch {
+          /* unknown capabilities: assume a plain chat model */
+        }
+        return { m, caps }
+      }),
+    )
+    return detailed
+      .filter(({ caps }) => !(caps.includes('embedding') && !caps.includes('completion')))
+      .map(({ m, caps }) => ({
+        name: m.name,
+        sizeGB: m.size / 1e9,
+        tools: caps.includes('tools'),
+        thinking: caps.includes('thinking'),
+      }))
+  } catch {
+    return null
+  }
+}
+
+/** Download a model, reporting progress as text and (when known) a percentage. */
+export async function pullModel(name: string, onProgress: (status: string, percent: number | null) => void) {
+  const stream = await ollama.pull({ model: name, stream: true })
+  for await (const p of stream) onProgress(p.status, p.total ? Math.round((p.completed / p.total) * 100) : null)
+}
+
+/** Delete a model from disk. */
+export const deleteModel = (name: string) => ollama.delete({ model: name })

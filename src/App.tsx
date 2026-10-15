@@ -1,68 +1,50 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { ChangeEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createAgent } from './ai/agent'
-import type { AgentReply } from './ai/agent'
-import {
-  datasetStore,
-  employeeStore,
-  inventoryStore,
-  noteStore,
-  salesStore,
-  taskStore,
-  ticketStore,
-} from './ai/data'
-import { CORE_KINDS, coreColumns, coreLabel, importCore, importDataset, removeDataset, resetCore, templateCsv } from './ai/datasets'
-import type { CoreKind } from './ai/datasets'
 import { sampleDocs } from './ai/documents'
 import type { SourceDoc } from './ai/documents'
-import { ACCEPTED_FILES, downloadMarkdown, downloadText, learnedDoc, parseUpload } from './ai/ingest'
-import type { ToolCall } from './ai/tools'
-import { checkModel, createLlmAgent, MODEL } from './ai/llm'
-import { buildSemantic, checkEmbedModel, EMBED_MODEL } from './ai/ollama'
+import { learnedDoc, parseUpload } from './ai/ingest'
+import { createLlmAgent, DEFAULT_MODEL, OFFLINE, unloadModel } from './ai/llm'
+import { buildSemantic, checkEmbedModel, EMBED_MODEL, listChatModels } from './ai/ollama'
+import type { InstalledModel } from './ai/ollama'
 import { buildIndex } from './ai/rag'
 import type { Index, Semantic } from './ai/rag'
+import type { ToolCall } from './ai/tools'
+import { Chat } from './components/Chat'
+import type { Turn } from './components/Chat'
+import { DataView } from './components/DataView'
+import { KnowledgeView } from './components/KnowledgeView'
+import { ModelsView } from './components/ModelsView'
+import { Toolkit } from './components/Toolkit'
+import { WorkspaceView } from './components/WorkspaceView'
 import { useLocalStorage } from './useLocalStorage'
 import './App.css'
 
-interface Turn {
-  question: string
-  reply: AgentReply
-}
+type View = 'chat' | 'toolkit' | 'knowledge' | 'data' | 'models' | 'workspace'
 
-type Tab = 'knowledge' | 'tools' | 'data' | 'workspace'
-
-const SUGGESTIONS: Record<string, string[]> = {
-  Policies: ['How many vacation days do I get?', 'What is the meal allowance when travelling?', 'How do I reset my password?'],
-  'Company data': ['Who is Maria Santos?', 'Which items are low on stock?', 'Show sales for the North region'],
-  Actions: ['Create a high priority ticket: laptop screen is cracked', 'Add a task: send report, due 2026-10-20', 'Save a note: call the supplier on Monday'],
-  Utilities: ['What is 15% of 48000?', 'Convert 5 miles to km', 'How many days until 2026-12-25?', 'Generate a 20 character password'],
-  Internet: ['What is the weather in Manila?', 'Convert 100 USD to PHP', 'Wikipedia: enterprise resource planning'],
+const VIEW_TITLES: Record<View, string> = {
+  chat: 'Chat',
+  toolkit: 'Toolkit',
+  knowledge: 'Knowledge',
+  data: 'Data',
+  models: 'Models',
+  workspace: 'Workspace',
 }
 
 function App() {
+  const [view, setView] = useState<View>(() => {
+    const hash = window.location.hash.slice(1)
+    return hash in VIEW_TITLES ? (hash as View) : 'chat'
+  })
   const [uploaded, setUploaded] = useLocalStorage<SourceDoc[]>('acme-assistant-uploads', [])
   const [turns, setTurns] = useLocalStorage<Turn[]>('acme-assistant-chat', [])
   const [internet, setInternet] = useLocalStorage<boolean>('acme-assistant-internet', false)
   const [semanticOn, setSemanticOn] = useLocalStorage<boolean>('acme-assistant-semantic', false)
+  const [modelId, setModelId] = useLocalStorage<string>('acme-assistant-model', DEFAULT_MODEL)
   const [embedReady, setEmbedReady] = useState(false)
   const [built, setBuilt] = useState<{ index: Index; semantic: Semantic } | null>(null)
   const [semanticError, setSemanticError] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>('knowledge')
-  const [input, setInput] = useState('')
   const [pending, setPending] = useState<{ question: string; text: string } | null>(null)
-  const [llmStatus, setLlmStatus] = useState<string | null>('checking')
-  const [useLlm, setUseLlm] = useState(true)
-  const endRef = useRef<HTMLDivElement>(null)
-
-  const tickets = useSyncExternalStore(ticketStore.subscribe, ticketStore.get)
-  const notes = useSyncExternalStore(noteStore.subscribe, noteStore.get)
-  const tasks = useSyncExternalStore(taskStore.subscribe, taskStore.get)
-  const employees = useSyncExternalStore(employeeStore.subscribe, employeeStore.get)
-  const inventory = useSyncExternalStore(inventoryStore.subscribe, inventoryStore.get)
-  const sales = useSyncExternalStore(salesStore.subscribe, salesStore.get)
-  const datasets = useSyncExternalStore(datasetStore.subscribe, datasetStore.get)
-  const [dataMsg, setDataMsg] = useState<string | null>(null)
-  const coreRows: Record<CoreKind, number> = { employees: employees.length, inventory: inventory.length, sales: sales.length }
+  const [installed, setInstalled] = useState<InstalledModel[] | null | 'checking'>('checking')
 
   const docs = useMemo(() => [...sampleDocs, ...uploaded], [uploaded])
   const index = useMemo(() => buildIndex(docs), [docs])
@@ -72,9 +54,28 @@ function App() {
   const llm = useMemo(() => createLlmAgent(ctx), [ctx])
   const allTools = llm.tools
 
+  // Keep the address bar in step with the page, so views can be bookmarked (e.g. #toolkit).
   useEffect(() => {
-    checkModel().then(setLlmStatus)
+    window.history.replaceState(null, '', `#${view}`)
+  }, [view])
+
+  useEffect(() => {
+    listChatModels().then(setInstalled)
     checkEmbedModel().then(setEmbedReady)
+
+    // Models pulled or deleted in a terminal show up when you come back to this tab.
+    const recheck = () => {
+      if (document.visibilityState === 'visible') {
+        listChatModels().then(setInstalled)
+        checkEmbedModel().then(setEmbedReady)
+      }
+    }
+    document.addEventListener('visibilitychange', recheck)
+    window.addEventListener('focus', recheck)
+    return () => {
+      document.removeEventListener('visibilitychange', recheck)
+      window.removeEventListener('focus', recheck)
+    }
   }, [])
 
   // Build the embedding index (only when switched on) for the current set of documents.
@@ -95,17 +96,30 @@ function App() {
     }
   }, [semanticOn, embedReady, index])
 
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [turns, pending])
-
-  const usingLlm = useLlm && llmStatus === null
+  const found = Array.isArray(installed) ? installed.find((m) => m.name === modelId) : undefined
+  const model = found && { id: found.name, thinking: found.thinking, tools: found.tools }
+  const usingLlm = model !== undefined
   const busy = pending !== null
+
+  // Why the AI model is not being used (shown under the top bar), or null when it is.
+  const llmStatus: string | null =
+    installed === 'checking' || modelId === OFFLINE
+      ? null
+      : installed === null
+        ? 'Ollama is not running at http://127.0.0.1:11434'
+        : usingLlm
+          ? null
+          : `Model not found. Run: ollama pull ${modelId}`
+
+  function chooseModel(next: string) {
+    if (model && next !== model.id) unloadModel(model.id) // free its RAM straight away
+    setModelId(next)
+  }
 
   async function ask(question: string) {
     const q = question.trim()
     if (!q || busy) return
-    setInput('')
+    setView('chat')
     setPending({ question: q, text: '' })
     try {
       const history = turns.flatMap((t) => [
@@ -113,7 +127,7 @@ function App() {
         { role: 'assistant' as const, content: t.reply.text },
       ])
       const reply = usingLlm
-        ? await llm.respond(history, q, (text) => setPending({ question: q, text }), internet)
+        ? await llm.respond(history, q, (text) => setPending({ question: q, text }), internet, model)
         : await offline.respond(q)
       setTurns((t) => [...t, { question: q, reply }])
     } catch (e) {
@@ -124,356 +138,123 @@ function App() {
     }
   }
 
-  async function onUpload(e: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
-    e.target.value = ''
+  async function onUpload(files: File[]) {
     const added = await Promise.all(files.map(async (f) => parseUpload(f.name, await f.text())))
     setUploaded((u) => [...u.filter((d) => !added.some((a) => a.id === d.id)), ...added])
   }
 
   function learnables(calls: ToolCall[]) {
     return calls.flatMap((c) => {
-      const found = allTools.find((t) => t.name === c.tool)?.learn?.(c.args, c.result)
-      return found ? [learnedDoc(found)] : []
+      const learn = allTools.find((t) => t.name === c.tool)?.learn?.(c.args, c.result)
+      return learn ? [learnedDoc(learn)] : []
     })
-  }
-
-  function saveDoc(doc: SourceDoc) {
-    setUploaded((u) => [...u.filter((d) => d.id !== doc.id), doc])
-    setTab('knowledge')
-  }
-
-  async function onImport(e: ChangeEvent<HTMLInputElement>, kind: CoreKind | null) {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
-    const note = (saved: boolean) => (saved ? '' : ' (too large to save in this browser; kept for this session only)')
-    try {
-      const text = await file.text()
-      if (kind) {
-        const r = importCore(kind, file.name, text)
-        setDataMsg(`Imported ${r.count} ${coreLabel(kind).toLowerCase()} rows${note(r.saved)}.`)
-      } else {
-        const r = importDataset(file.name, text)
-        setDataMsg(`Imported dataset "${r.dataset.name}" (${r.dataset.rows.length} rows)${note(r.saved)}.`)
-      }
-    } catch (err) {
-      setDataMsg(`Import failed: ${(err as Error).message}`)
-    }
   }
 
   const savedIds = useMemo(() => new Set(uploaded.map((d) => d.id)), [uploaded])
   const chunkCount = (id: string) => index.chunks.filter((c) => c.docId === id).length
 
-  const toolGroups = useMemo(() => {
-    const groups = new Map<string, typeof allTools>()
-    for (const t of allTools) groups.set(t.category, [...(groups.get(t.category) ?? []), t])
-    return [...groups]
-  }, [allTools])
+  const nav: { id: View; label: string; icon: string; count?: number }[] = [
+    { id: 'chat', label: 'Chat', icon: '💬' },
+    { id: 'toolkit', label: 'Toolkit', icon: '🧰', count: allTools.length },
+    { id: 'knowledge', label: 'Knowledge', icon: '📚', count: docs.length },
+    { id: 'data', label: 'Data', icon: '🗂️' },
+    { id: 'models', label: 'Models', icon: '🧠' },
+    { id: 'workspace', label: 'Workspace', icon: '✅' },
+  ]
+
+  const dot = usingLlm ? 'ok' : installed === 'checking' || modelId === OFFLINE ? 'idle' : 'warn'
 
   return (
-    <div className="app">
-      <header>
-        <div>
-          <h1>Acme Assistant</h1>
-          <p>Corporate AI with tools and RAG, running locally.</p>
+    <div className="shell">
+      <aside className="rail">
+        <div className="brand">
+          <span className="logo">✦</span>
+          <span className="brand-name">Acme Assistant</span>
         </div>
-        <div className="header-right">
-          {llmStatus === 'checking' ? (
-            <span className="badge">Checking model…</span>
-          ) : llmStatus === null ? (
-            <label className="badge ok">
-              <input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} />
-              {MODEL}
-            </label>
-          ) : (
-            <span className="badge warn" title={llmStatus}>
-              Offline mode
-            </span>
-          )}
-          <button type="button" onClick={() => setTurns([])} disabled={busy || !turns.length}>
-            Clear chat
-          </button>
-        </div>
-      </header>
-      {llmStatus && llmStatus !== 'checking' && <p className="notice">{llmStatus} - using the basic rule-based agent.</p>}
-
-      <div className="layout">
-        <aside>
-          <nav>
-            {(['knowledge', 'tools', 'data', 'workspace'] as Tab[]).map((t) => (
-              <button key={t} type="button" className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-                {t === 'knowledge' ? 'Docs' : t === 'tools' ? `Tools (${llm.tools.length})` : t === 'data' ? 'Data' : 'Mine'}
-              </button>
-            ))}
-          </nav>
-
-          {tab === 'knowledge' && (
-            <>
-              <p className="hint">
-                {docs.length} documents, {index.chunks.length} chunks. Upload .md, .txt, .csv, .json or .html files to extend
-                the AI&apos;s knowledge.
-              </p>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={semanticOn && embedReady}
-                  disabled={!embedReady}
-                  onChange={(e) => setSemanticOn(e.target.checked)}
-                />
-                <span>
-                  Semantic search (finds meaning, not just keywords)
-                  {!embedReady && (
-                    <>
-                      {' '}
-                      - run <code>ollama pull {EMBED_MODEL}</code> (~270 MB) to enable
-                    </>
-                  )}
-                  {embedReady && semanticOn && !semantic && !semanticError && ' - indexing…'}
-                  {semanticError && ` - failed: ${semanticError}`}
-                </span>
-              </label>
-              <label className="upload">
-                + Upload documents
-                <input type="file" accept={ACCEPTED_FILES} multiple hidden onChange={onUpload} />
-              </label>
-              <ul>
-                {docs.map((d) => (
-                  <li key={d.id}>
-                    <strong>{d.title}</strong>
-                    <span>
-                      {d.source ? `learned ${d.savedAt} · ` : ''}
-                      {d.id} · {chunkCount(d.id)} chunk(s)
-                    </span>
-                    {uploaded.some((u) => u.id === d.id) && (
-                      <span className="actions">
-                        <button type="button" className="link" onClick={() => downloadMarkdown(d)}>
-                          download .md
-                        </button>
-                        <button type="button" className="link" onClick={() => setUploaded((u) => u.filter((x) => x.id !== d.id))}>
-                          remove
-                        </button>
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          {tab === 'tools' && (
-            <>
-              <p className="hint">
-                For each question, a router offers the model only the few most relevant tools, which keeps memory use low.
-              </p>
-              <label className="toggle">
-                <input type="checkbox" checked={internet} onChange={(e) => setInternet(e.target.checked)} />
-                Allow internet tools (sends your question text to Wikipedia, Open-Meteo and Frankfurter)
-              </label>
-              {toolGroups.map(([category, list]) => (
-                <div key={category}>
-                  <h3>{category}</h3>
-                  <ul>
-                    {list.map((t) => (
-                      <li key={t.name} className={t.network && !internet ? 'off' : ''}>
-                        <strong>{t.name}</strong>
-                        <span>{t.description}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </>
-          )}
-
-          {tab === 'data' && (
-            <>
-              <p className="hint">
-                The assistant answers company questions from this data. It starts with made-up samples; import your own CSV or
-                JSON files to replace them. Data stays in this browser.
-              </p>
-              {dataMsg && <p className="notice">{dataMsg}</p>}
-              {CORE_KINDS.map((kind) => (
-                <div key={kind} className="dataset">
-                  <strong>
-                    {coreLabel(kind)} ({coreRows[kind]} rows)
-                  </strong>
-                  <span>Columns: {coreColumns(kind).join(', ')}</span>
-                  <span className="actions">
-                    <label className="link">
-                      import file
-                      <input type="file" accept=".csv,.json" hidden onChange={(e) => onImport(e, kind)} />
-                    </label>
-                    <button type="button" className="link" onClick={() => downloadText(`${kind}-template.csv`, templateCsv(kind), 'text/csv')}>
-                      template
-                    </button>
-                    <button type="button" className="link" onClick={() => resetCore(kind)}>
-                      reset to sample
-                    </button>
-                  </span>
-                </div>
-              ))}
-              <h3>Other tables</h3>
-              <p className="hint">Import any CSV or JSON file. The assistant can then search and total it.</p>
-              <label className="upload">
-                + Import a table
-                <input type="file" accept=".csv,.json" hidden onChange={(e) => onImport(e, null)} />
-              </label>
-              <ul>
-                {datasets.length === 0 && <li>None yet.</li>}
-                {datasets.map((d) => (
-                  <li key={d.name}>
-                    <strong>{d.name}</strong>
-                    <span>
-                      {d.rows.length} rows · {d.headers.join(', ')}
-                    </span>
-                    <button type="button" className="link" onClick={() => removeDataset(d.name)}>
-                      remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-
-          {tab === 'workspace' && (
-            <>
-              <p className="hint">Things the assistant created for you. Saved in this browser only.</p>
-              <h3>Tickets ({tickets.length})</h3>
-              <ul>
-                {tickets.length === 0 && <li>None yet.</li>}
-                {tickets.map((t) => (
-                  <li key={t.id}>
-                    <strong>
-                      {t.id} <span className={`prio ${t.priority}`}>{t.priority}</span>
-                    </strong>
-                    <span>{t.title}</span>
-                  </li>
-                ))}
-              </ul>
-              <h3>Tasks ({tasks.length})</h3>
-              <ul>
-                {tasks.length === 0 && <li>None yet.</li>}
-                {tasks.map((t) => (
-                  <li key={t.id} className={t.done ? 'off' : ''}>
-                    <strong>
-                      {t.done ? '✓' : '○'} {t.title}
-                    </strong>
-                    {t.due && <span>due {t.due}</span>}
-                  </li>
-                ))}
-              </ul>
-              <h3>Notes ({notes.length})</h3>
-              <ul>
-                {notes.length === 0 && <li>None yet.</li>}
-                {notes.map((n) => (
-                  <li key={n.id}>
-                    <span>{n.text}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </aside>
-
-        <main className="chat">
-          <div className="log">
-            {turns.length === 0 && !pending && (
-              <div className="welcome">
-                <h2>How can I help?</h2>
-                {Object.entries(SUGGESTIONS)
-                  .filter(([group]) => group !== 'Internet' || internet)
-                  .map(([group, qs]) => (
-                    <div key={group}>
-                      <h3>{group}</h3>
-                      <div className="chips">
-                        {qs.map((q) => (
-                          <button key={q} type="button" onClick={() => ask(q)}>
-                            {q}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
-
-            {turns.map((t, i) => (
-              <Message key={i} question={t.question} reply={t.reply} learnable={learnables(t.reply.calls)} savedIds={savedIds} onSave={saveDoc} />
-            ))}
-            {pending && (
-              <Message
-                question={pending.question}
-                reply={{ text: pending.text || 'Thinking…', calls: [], sources: [] }}
-                learnable={[]}
-                savedIds={savedIds}
-                onSave={saveDoc}
-              />
-            )}
-            <div ref={endRef} />
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              ask(input)
-            }}
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about policies, data, utilities, or tell me to create tickets, tasks and notes…"
-            />
-            <button type="submit" disabled={busy}>
-              {busy ? 'Working…' : 'Send'}
+        <button
+          type="button"
+          className="new-chat"
+          disabled={busy}
+          onClick={() => {
+            setTurns([])
+            setView('chat')
+          }}
+        >
+          <span>＋</span> New chat
+        </button>
+        <nav>
+          {nav.map((n) => (
+            <button key={n.id} type="button" className={view === n.id ? 'active' : ''} onClick={() => setView(n.id)}>
+              <span className="icon">{n.icon}</span>
+              <span className="label">{n.label}</span>
+              {n.count !== undefined && <span className="badge-count">{n.count}</span>}
             </button>
-          </form>
-        </main>
-      </div>
-    </div>
-  )
-}
+          ))}
+        </nav>
+        <div className="rail-foot">
+          <span className={`dot ${dot}`} />
+          <span>{usingLlm ? model.id : modelId === OFFLINE ? 'Basic mode' : installed === 'checking' ? 'Checking…' : 'No model'}</span>
+        </div>
+      </aside>
 
-interface MessageProps extends Turn {
-  learnable: SourceDoc[]
-  savedIds: Set<string>
-  onSave: (doc: SourceDoc) => void
-}
+      <main className="main">
+        <header className="topbar">
+          <h2>{VIEW_TITLES[view]}</h2>
+          <label className="model-pick" title="Choose which AI model answers">
+            <span className={`dot ${dot}`} />
+            <select value={modelId} disabled={busy} onChange={(e) => chooseModel(e.target.value)}>
+              {Array.isArray(installed) &&
+                installed.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.name} ({m.sizeGB.toFixed(1)} GB{m.tools ? '' : ', no tools'})
+                  </option>
+                ))}
+              {modelId !== OFFLINE && !found && <option value={modelId}>{modelId} (not installed)</option>}
+              <option value={OFFLINE}>Basic (no AI model)</option>
+            </select>
+          </label>
+        </header>
+        {llmStatus && <p className="banner warn">{llmStatus} - using the basic rule-based agent.</p>}
 
-function Message({ question, reply, learnable, savedIds, onSave }: MessageProps) {
-  return (
-    <div className="turn">
-      <p className="q">{question}</p>
-      <div className="a">
-        {reply.calls.map((c, j) => (
-          <details key={j} className="call">
-            <summary>
-              Used tool <code>{c.tool}</code>
-            </summary>
-            <pre>
-              {JSON.stringify(c.args)}
-              {'\n→ '}
-              {c.result}
-            </pre>
-          </details>
-        ))}
-        <p>{reply.text}</p>
-        {reply.sources.length > 0 && (
-          <div className="sources">
-            {reply.sources.map((s) => (
-              <span key={s.id} title={`score ${s.score.toFixed(2)}`}>
-                {s.id} · {s.title}
-              </span>
-            ))}
-          </div>
+        {view === 'chat' && (
+          <Chat
+            turns={turns}
+            pending={pending}
+            tools={allTools}
+            internet={internet}
+            onInternet={setInternet}
+            onSend={ask}
+            learnables={learnables}
+            savedIds={savedIds}
+            onSave={(doc) => setUploaded((u) => [...u.filter((d) => d.id !== doc.id), doc])}
+            modelLabel={usingLlm ? model.id : 'Basic mode'}
+          />
         )}
-        {learnable.map((d) => (
-          <button key={d.id} type="button" className="save" disabled={savedIds.has(d.id)} onClick={() => onSave(d)}>
-            {savedIds.has(d.id) ? `Saved: ${d.title}` : `Save "${d.title}" to knowledge`}
-          </button>
-        ))}
-        {reply.offered && <small className="offered">Tools offered: {reply.offered.join(', ')}</small>}
-      </div>
+        {view === 'toolkit' && <Toolkit tools={allTools} internet={internet} onInternet={setInternet} onTry={ask} />}
+        {view === 'knowledge' && (
+          <KnowledgeView
+            docs={docs}
+            uploadedIds={savedIds}
+            chunkCount={chunkCount}
+            onUpload={onUpload}
+            onRemove={(id) => setUploaded((u) => u.filter((d) => d.id !== id))}
+            onAsk={ask}
+            semantic={{
+              on: semanticOn,
+              ready: embedReady,
+              indexing: semanticOn && embedReady && !semantic && !semanticError,
+              error: semanticError,
+              embedModel: EMBED_MODEL,
+              onToggle: setSemanticOn,
+            }}
+          />
+        )}
+        {view === 'data' && <DataView />}
+        {view === 'models' && (
+          <ModelsView installed={installed} modelId={modelId} onChoose={chooseModel} onRefresh={() => listChatModels().then(setInstalled)} />
+        )}
+        {view === 'workspace' && <WorkspaceView />}
+      </main>
     </div>
   )
 }
