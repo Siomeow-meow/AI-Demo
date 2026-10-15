@@ -13,17 +13,28 @@ const CATEGORY_ORDER = [
   'Company data',
   'Your data',
   'ERP',
+  'HR & payroll',
   'POS',
   'Business',
   'Finance',
   'IT',
   'Networking',
   'Math & utility',
+  'Statistics & math',
+  'Date & time',
   'Text & data',
+  'Everyday life',
+  'Education & decisions',
   'Knowledge',
   'Personal workspace',
   'Internet',
 ]
+
+/** Every category that has tools: the known ones in this order, then any new ones alphabetically (never hidden). */
+function orderedCategories(present: Iterable<string>): string[] {
+  const set = new Set(present)
+  return [...CATEGORY_ORDER.filter((c) => set.has(c)), ...[...set].filter((c) => !CATEGORY_ORDER.includes(c)).sort()]
+}
 
 export function Toolkit({ tools, internet, onInternet, onTry }: Props) {
   const [query, setQuery] = useState('')
@@ -32,7 +43,7 @@ export function Toolkit({ tools, internet, onInternet, onTry }: Props) {
   const counts = useMemo(() => {
     const m = new Map<string, number>()
     for (const t of tools) m.set(t.category, (m.get(t.category) ?? 0) + 1)
-    return CATEGORY_ORDER.filter((c) => m.has(c)).map((c) => [c, m.get(c)!] as const)
+    return orderedCategories(m.keys()).map((c) => [c, m.get(c)!] as const)
   }, [tools])
 
   const groups = useMemo(() => {

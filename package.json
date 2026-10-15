@@ -10,9 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "ollama": "^0.6.4",
+    "pdfjs-dist": "5.5.207",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "read-excel-file": "^9.3.12"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

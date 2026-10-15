@@ -2,7 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { createAgent } from './ai/agent'
 import { sampleDocs } from './ai/documents'
 import type { SourceDoc } from './ai/documents'
-import { learnedDoc, parseUpload } from './ai/ingest'
+import { describeAttachments, ingestFiles } from './ai/files'
+import { quickHelp } from './ai/help'
+import type { Attachment } from './ai/files'
+import { learnedDoc } from './ai/ingest'
 import { createLlmAgent, DEFAULT_MODEL, OFFLINE, unloadModel } from './ai/llm'
 import { buildSemantic, checkEmbedModel, EMBED_MODEL, listChatModels } from './ai/ollama'
 import type { InstalledModel } from './ai/ollama'
@@ -11,7 +14,6 @@ import type { Index, Semantic } from './ai/rag'
 import type { ToolCall } from './ai/tools'
 import { Chat } from './components/Chat'
 import type { Turn } from './components/Chat'
-import { DataView } from './components/DataView'
 import { KnowledgeView } from './components/KnowledgeView'
 import { ModelsView } from './components/ModelsView'
 import { Toolkit } from './components/Toolkit'
@@ -19,13 +21,12 @@ import { WorkspaceView } from './components/WorkspaceView'
 import { useLocalStorage } from './useLocalStorage'
 import './App.css'
 
-type View = 'chat' | 'toolkit' | 'knowledge' | 'data' | 'models' | 'workspace'
+type View = 'chat' | 'toolkit' | 'knowledge' | 'models' | 'workspace'
 
 const VIEW_TITLES: Record<View, string> = {
   chat: 'Chat',
   toolkit: 'Toolkit',
   knowledge: 'Knowledge',
-  data: 'Data',
   models: 'Models',
   workspace: 'Workspace',
 }
@@ -43,7 +44,8 @@ function App() {
   const [embedReady, setEmbedReady] = useState(false)
   const [built, setBuilt] = useState<{ index: Index; semantic: Semantic } | null>(null)
   const [semanticError, setSemanticError] = useState<string | null>(null)
-  const [pending, setPending] = useState<{ question: string; text: string } | null>(null)
+  const [pending, setPending] = useState<{ question: string; text: string; attachments: Attachment[] } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [installed, setInstalled] = useState<InstalledModel[] | null | 'checking'>('checking')
 
   const docs = useMemo(() => [...sampleDocs, ...uploaded], [uploaded])
@@ -116,31 +118,51 @@ function App() {
     setModelId(next)
   }
 
-  async function ask(question: string) {
+  async function ask(question: string, attachments: Attachment[] = []) {
     const q = question.trim()
     if (!q || busy) return
     setView('chat')
-    setPending({ question: q, text: '' })
+    setPending({ question: q, text: '', attachments })
     try {
+      // The model is told which files were attached; the chat only shows the question and the file chips.
       const history = turns.flatMap((t) => [
-        { role: 'user' as const, content: t.question },
+        { role: 'user' as const, content: t.question + describeAttachments(t.attachments ?? []) },
         { role: 'assistant' as const, content: t.reply.text },
       ])
-      const reply = usingLlm
-        ? await llm.respond(history, q, (text) => setPending({ question: q, text }), internet, model)
+      const help = attachments.length ? null : quickHelp(q)
+      const reply = help
+        ? { text: help, calls: [], sources: [] }
+        : usingLlm
+        ? await llm.respond(history, q + describeAttachments(attachments), (text) => setPending({ question: q, text, attachments }), internet, model, attachments)
         : await offline.respond(q)
-      setTurns((t) => [...t, { question: q, reply }])
+      setTurns((t) => [...t, { question: q, reply, attachments }])
     } catch (e) {
       const text = `Error: ${(e as Error).message}`
-      setTurns((t) => [...t, { question: q, reply: { text, calls: [], sources: [] } }])
+      setTurns((t) => [...t, { question: q, reply: { text, calls: [], sources: [] }, attachments }])
     } finally {
       setPending(null)
     }
   }
 
+  /** Read files, make tables available to the data tools and text to the knowledge search. */
+  const attachFiles = (files: File[]) =>
+    ingestFiles(files, (docs) => setUploaded((u) => [...u.filter((d) => !docs.some((a) => a.id === d.id)), ...docs]))
+
   async function onUpload(files: File[]) {
-    const added = await Promise.all(files.map(async (f) => parseUpload(f.name, await f.text())))
-    setUploaded((u) => [...u.filter((d) => !added.some((a) => a.id === d.id)), ...added])
+    const result = await attachFiles(files)
+    const tables = result.filter((a) => a.kind === 'table').length
+    const docsAdded = result.filter((a) => a.kind === 'document').length
+    const failed = result.filter((a) => a.kind === 'error')
+    setNotice(
+      [
+        tables ? `${tables} table${tables > 1 ? 's' : ''} added and searchable` : '',
+        docsAdded ? `${docsAdded} document${docsAdded > 1 ? 's' : ''} added to Knowledge` : '',
+        ...failed.map((f) => `${f.name}: ${f.detail}`),
+      ]
+        .filter(Boolean)
+        .join('. '),
+    )
+    setTimeout(() => setNotice(null), 8000)
   }
 
   function learnables(calls: ToolCall[]) {
@@ -157,7 +179,6 @@ function App() {
     { id: 'chat', label: 'Chat', icon: '💬' },
     { id: 'toolkit', label: 'Toolkit', icon: '🧰', count: allTools.length },
     { id: 'knowledge', label: 'Knowledge', icon: '📚', count: docs.length },
-    { id: 'data', label: 'Data', icon: '🗂️' },
     { id: 'models', label: 'Models', icon: '🧠' },
     { id: 'workspace', label: 'Workspace', icon: '✅' },
   ]
@@ -209,12 +230,13 @@ function App() {
                     {m.name} ({m.sizeGB.toFixed(1)} GB{m.tools ? '' : ', no tools'})
                   </option>
                 ))}
-              {modelId !== OFFLINE && !found && <option value={modelId}>{modelId} (not installed)</option>}
+              {modelId !== OFFLINE && !found && <option value={modelId}>{installed === 'checking' ? modelId : `${modelId} (not installed)`}</option>}
               <option value={OFFLINE}>Basic (no AI model)</option>
             </select>
           </label>
         </header>
         {llmStatus && <p className="banner warn">{llmStatus} - using the basic rule-based agent.</p>}
+        {notice && <p className="banner ok">{notice}</p>}
 
         {view === 'chat' && (
           <Chat
@@ -224,13 +246,14 @@ function App() {
             internet={internet}
             onInternet={setInternet}
             onSend={ask}
+            onAttach={attachFiles}
             learnables={learnables}
             savedIds={savedIds}
             onSave={(doc) => setUploaded((u) => [...u.filter((d) => d.id !== doc.id), doc])}
             modelLabel={usingLlm ? model.id : 'Basic mode'}
           />
         )}
-        {view === 'toolkit' && <Toolkit tools={allTools} internet={internet} onInternet={setInternet} onTry={ask} />}
+        {view === 'toolkit' && <Toolkit tools={allTools} internet={internet} onInternet={setInternet} onTry={(p) => ask(p)} />}
         {view === 'knowledge' && (
           <KnowledgeView
             docs={docs}
@@ -238,7 +261,7 @@ function App() {
             chunkCount={chunkCount}
             onUpload={onUpload}
             onRemove={(id) => setUploaded((u) => u.filter((d) => d.id !== id))}
-            onAsk={ask}
+            onAsk={(p) => ask(p)}
             semantic={{
               on: semanticOn,
               ready: embedReady,
@@ -249,7 +272,6 @@ function App() {
             }}
           />
         )}
-        {view === 'data' && <DataView />}
         {view === 'models' && (
           <ModelsView installed={installed} modelId={modelId} onChoose={chooseModel} onRefresh={() => listChatModels().then(setInstalled)} />
         )}

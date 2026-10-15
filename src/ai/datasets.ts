@@ -82,7 +82,28 @@ function toRecords(kind: CoreKind, table: Table): Record<string, string | number
 
 /** Import a CSV/JSON file as one of the core datasets, replacing the current rows. Returns the row count. */
 export function importCore(kind: CoreKind, filename: string, text: string): { count: number; saved: boolean } {
-  const recs = toRecords(kind, readTable(filename, text))
+  return importCoreTable(kind, readTable(filename, text))
+}
+
+/**
+ * Guess whether a table holds employees, inventory or sales records, by its column names.
+ * Strict on purpose: the required columns plus at least one more known column must be present.
+ */
+export function detectCore(table: Table): CoreKind | null {
+  const has = (aliases: string[]) => table.headers.some((h) => aliases.some((a) => norm(a) === norm(h)))
+  for (const kind of CORE_KINDS) {
+    const fields = SCHEMAS[kind].fields
+    const required = fields.filter((f) => f.required)
+    if (!required.every((f) => has(f.aliases))) continue
+    const extra = fields.filter((f) => !f.required && has(f.aliases)).length
+    if (extra >= (kind === 'employees' ? 2 : 1)) return kind
+  }
+  return null
+}
+
+/** Replace one of the core records (employees, inventory or sales) with the rows of a table. */
+export function importCoreTable(kind: CoreKind, table: Table): { count: number; saved: boolean } {
+  const recs = toRecords(kind, table)
   let saved: boolean
   // The cast is safe: toRecords produced exactly the fields each store expects.
   if (kind === 'employees') saved = employeeStore.set(recs as never)
@@ -99,8 +120,12 @@ export function resetCore(kind: CoreKind) {
 
 /** Import any CSV/JSON file as a generic dataset named after the file. */
 export function importDataset(filename: string, text: string): { dataset: Dataset; saved: boolean } {
-  const table = readTable(filename, text)
   const name = filename.replace(/\.[^.]+$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'data'
+  return addDataset(name, readTable(filename, text))
+}
+
+/** Store a table as a dataset (replacing one with the same name). */
+export function addDataset(name: string, table: Table): { dataset: Dataset; saved: boolean } {
   const dataset: Dataset = { name, ...table }
   const saved = datasetStore.set([...datasetStore.get().filter((d) => d.name !== name), dataset])
   return { dataset, saved }

@@ -60,7 +60,7 @@ export function knowledgeTools({ index, docs, semantic }: ToolContext): Tool[] {
         const doc =
           docs.find((d) => d.id.toLowerCase() === q || d.title.toLowerCase() === q) ??
           docs.find((d) => d.title.toLowerCase().includes(q) || d.id.toLowerCase().includes(q))
-        return doc ? `# ${doc.title}\n\n${doc.text.slice(0, 3000)}` : `No document matches "${id}".`
+        return doc ? `# ${doc.title}\n\n${doc.text.slice(0, 5000)}` : `No document matches "${id}".`
       },
     },
     {

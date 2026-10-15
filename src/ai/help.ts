@@ -1,0 +1,19 @@
+const CAPABILITY = /\b(can|could|may|is it possible|able to|how (do|can|to|would)|do you (accept|support|take|read|handle)|does it (accept|support))\b/
+const SEND = /\b(send|sending|upload|uploading|attach|attaching|import|importing|give|share|add|load|feed|provide|submit|accept|support|read|handle|open|take)\b/
+const THING = /\b(data|files?|documents?|docs?|csv|excel|xlsx|spreadsheets?|pdfs?|word|docx|powerpoint|pptx|json|tables?|reports?)\b/
+
+/** Instant, exact answers to "can I send you my data / files?" so a small model cannot get it vague or wrong. */
+export function quickHelp(question: string): string | null {
+  const q = question.toLowerCase()
+  if (q.includes('[attached files')) return null
+  if (!(CAPABILITY.test(q) && SEND.test(q) && THING.test(q))) return null
+  return [
+    'Yes - you can send me your own files and data, right here in the chat.',
+    '',
+    '1. Click 📎 Attach under the message box, or drag files onto the chat, or paste them.',
+    '2. Supported: CSV, Excel (.xlsx), JSON, PDF, Word (.docx), PowerPoint (.pptx), and text, Markdown, HTML or log files. (Scans and images cannot be read.)',
+    '3. Then ask about them, for example "Describe my data", "Which region has the highest total?", "Summarize the document" or "What does the policy say about remote work?".',
+    '',
+    'Tables can be searched, filtered, grouped and totalled, and every row is indexed so I can find individual records. Documents are split into passages and searched, and my answers show which file they came from. Files stay on this computer; you can review or remove them on the Knowledge page.',
+  ].join('\n')
+}

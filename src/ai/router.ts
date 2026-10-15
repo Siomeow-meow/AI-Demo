@@ -25,7 +25,9 @@ export function selectTools(tools: Tool[], question: string, k = 3, always: stri
   const best = scored[0]?.score ?? 0
   const picked = scored.filter((x) => x.score >= best * 0.6).slice(0, k).map((x) => x.tool)
 
-  const triggered = tools.filter((t) => t.trigger?.test(question) && !picked.includes(t) && !always.includes(t.name))
+  // Dates such as 2026-10-15 look like subtraction, so hide them before testing the triggers.
+  const forTriggers = question.replace(/\d{4}-\d{2}-\d{2}/g, ' ')
+  const triggered = tools.filter((t) => t.trigger?.test(forTriggers) && !picked.includes(t) && !always.includes(t.name))
   // The always-on tool goes last: small models tend to favour the first tool they are offered.
   return [...triggered, ...picked, ...tools.filter((t) => always.includes(t.name))]
 }

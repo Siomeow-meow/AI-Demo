@@ -185,7 +185,8 @@ export async function retrieveHybrid(index: Index, query: string, opts: Retrieve
 
   const lexical = retrieve(pool, query, pool.chunks.length, 0)
   const lexicalScore = new Map(lexical.map((h) => [h.chunk.id, h.score]))
-  const keywordOnly = () => lexical.filter((h) => h.score >= 0.05).slice(0, k)
+  const best = lexical[0]?.score ?? 0
+  const keywordOnly = () => lexical.filter((h) => h.score >= 0.05 && h.score >= best * 0.4).slice(0, k)
   if (!semantic) return keywordOnly()
 
   let qv: number[]

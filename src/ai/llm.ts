@@ -7,6 +7,7 @@ import { createTools } from './tools'
 import { smartRetrieve } from './tools/knowledge'
 import type { ToolCall, ToolContext } from './tools'
 import type { AgentReply } from './agent'
+import type { Attachment } from './files'
 
 /** The model used for a reply. Built from what Ollama reports about each installed model. */
 export interface ModelOption {
@@ -74,6 +75,8 @@ function systemPrompt(docs: ToolContext['docs']) {
 - Use the provided tools whenever they fit the request. Never invent tool results, employee, stock, sales or policy data; if a tool finds nothing, say so.
 - People, products, stock, sales and imported data tables: use the data tools (lookup_employee, check_inventory, sales_summary, query_dataset, aggregate_dataset), not the knowledge base.
 - For policies, procedures, IT help and company knowledge, search the knowledge base first and cite passages like [leave-policy#1]. ${describeDocs(docs)}
+- Users can send you files with the paperclip button (or by dropping them in the chat): CSV, Excel, PDF, Word, PowerPoint, JSON and text. Attached tables are searchable and can be totalled; attached documents are searchable and cited. If asked whether they can send data or files, say yes and explain this.
+- If the user's message ends with [Attached files: ...], work from those files: analyse tables with profile_dataset, query_dataset and aggregate_dataset, and read documents with search_knowledge_base, read_document or summarize_document. Never guess at their contents.
 - Greetings and general-knowledge questions can be answered directly without tools.`
 }
 
@@ -92,10 +95,19 @@ export function createLlmAgent(ctx: ToolContext) {
     onText: (text: string) => void,
     allowNetwork: boolean,
     model: ModelOption,
+    attached: Attachment[] = [],
   ): Promise<AgentReply> {
+    // Files in the chat: always offer the tools that can read them.
+    const forced = [
+      'search_knowledge_base',
+      ...(attached.some((a) => a.kind === 'table') ? ['profile_dataset', 'query_dataset', 'aggregate_dataset'] : []),
+      ...(attached.some((a) => a.kind === 'document') ? ['read_document', 'summarize_document'] : []),
+    ]
     const offeredTools = selectTools(
       tools.filter((t) => allowNetwork || !t.network),
       question,
+      3,
+      forced,
     )
     const schemas = offeredTools.map((t) => ({
       type: 'function' as const,

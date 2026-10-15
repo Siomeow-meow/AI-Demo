@@ -15,6 +15,23 @@ export const rows = (s: string | undefined) =>
     .map((x) => x.trim())
     .filter(Boolean)
 
+/** Parse a list of numbers separated by commas, semicolons, spaces or new lines (non-numbers become NaN). */
+export const nums = (s: string | undefined): number[] =>
+  (s ?? '')
+    .split(/[,;\s]+/)
+    .filter(Boolean)
+    .map((x) => num(x))
+
+/** Parse YYYY-MM-DD (or any date string) into a UTC-midnight Date, or null. Empty / "today" gives today. */
+export function dateOf(s: string | undefined): Date | null {
+  const v = (s ?? '').trim().toLowerCase()
+  const d = v === '' || v === 'today' || v === 'now' ? new Date() : /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`) : new Date(s as string)
+  if (Number.isNaN(d.getTime())) return null
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+}
+
+export const isoDay = (d: Date) => d.toISOString().slice(0, 10)
+
 /** Inverse of the standard normal distribution (Abramowitz-Stegun 26.2.23, accurate to about 0.0005). */
 export function zScore(p: number): number {
   if (p <= 0 || p >= 1) return NaN

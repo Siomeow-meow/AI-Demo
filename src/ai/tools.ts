@@ -1,5 +1,12 @@
 import { businessTools } from './tools/business'
 import { companyTools } from './tools/company'
+import { dateTimeExtraTools } from './tools/datetime-extra'
+import { educationTools } from './tools/education'
+import { erpMoreTools } from './tools/erp-more'
+import { everydayTools } from './tools/everyday'
+import { hrTools } from './tools/hr'
+import { mathMoreTools } from './tools/math-more'
+import { textMoreTools } from './tools/text-more'
 import { datasetTools } from './tools/datasets'
 import { erpTools } from './tools/erp'
 import { financeTools } from './tools/finance'
@@ -29,12 +36,19 @@ export function createTools(ctx: ToolContext): Tool[] {
   return [
     ...utilityTools,
     ...timeColorTools,
+    ...dateTimeExtraTools,
+    ...mathMoreTools,
+    ...everydayTools,
+    ...educationTools,
     ...textTools,
     ...textExtraTools,
+    ...textMoreTools,
     ...knowledgeTools(ctx),
     ...companyTools,
     ...datasetTools,
     ...erpTools,
+    ...erpMoreTools,
+    ...hrTools,
     ...posTools,
     ...businessTools,
     ...financeTools,

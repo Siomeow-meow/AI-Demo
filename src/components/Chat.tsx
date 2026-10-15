@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, ClipboardEvent, DragEvent } from 'react'
 import type { AgentReply } from '../ai/agent'
 import type { SourceDoc } from '../ai/documents'
+import { ATTACH_ACCEPT } from '../ai/files'
+import type { Attachment } from '../ai/files'
 import { TOOL_EXAMPLES } from '../ai/tool-examples'
 import type { Tool, ToolCall } from '../ai/tools'
 
 export interface Turn {
   question: string
   reply: AgentReply
+  attachments?: Attachment[]
 }
 
 /** Prompts about the written lessons and company documents (the tools supply the rest). */
@@ -21,52 +25,113 @@ const LESSON_PROMPTS = [
 
 const CATEGORY_ORDER = [
   'Company data',
+  'Your data',
   'ERP',
+  'HR & payroll',
   'POS',
   'Business',
   'Finance',
   'IT',
   'Networking',
   'Math & utility',
+  'Statistics & math',
+  'Date & time',
   'Text & data',
-  'Your data',
+  'Everyday life',
+  'Education & decisions',
   'Personal workspace',
   'Internet',
 ]
 
+/** Every category that has tools: the known ones in this order, then any new ones alphabetically (never hidden). */
+function orderedCategories(present: Iterable<string>): string[] {
+  const set = new Set(present)
+  return [...CATEGORY_ORDER.filter((c) => set.has(c)), ...[...set].filter((c) => !CATEGORY_ORDER.includes(c)).sort()]
+}
+
+/** Sent when files are attached without any message. */
+const DEFAULT_FILE_PROMPT = 'Look at the attached file(s): tell me what is in them and what I can ask.'
+
 interface Props {
   turns: Turn[]
-  pending: { question: string; text: string } | null
+  pending: { question: string; text: string; attachments: Attachment[] } | null
   tools: Tool[]
   internet: boolean
   onInternet: (on: boolean) => void
-  onSend: (question: string) => void
+  onSend: (question: string, attachments: Attachment[]) => void
+  onAttach: (files: File[]) => Promise<Attachment[]>
   learnables: (calls: ToolCall[]) => SourceDoc[]
   savedIds: Set<string>
   onSave: (doc: SourceDoc) => void
   modelLabel: string
 }
 
-export function Chat({ turns, pending, tools, internet, onInternet, onSend, learnables, savedIds, onSave, modelLabel }: Props) {
+export function Chat({ turns, pending, tools, internet, onInternet, onSend, onAttach, learnables, savedIds, onSave, modelLabel }: Props) {
   const endRef = useRef<HTMLDivElement>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [reading, setReading] = useState(false)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [turns, pending])
 
+  async function attach(files: File[]) {
+    if (!files.length) return
+    setReading(true)
+    try {
+      const added = await onAttach(files)
+      setAttachments((a) => [...a, ...added])
+    } finally {
+      setReading(false)
+    }
+  }
+
+  function send(question: string) {
+    const usable = attachments.filter((a) => a.kind !== 'error')
+    onSend(question || (usable.length ? DEFAULT_FILE_PROMPT : ''), usable)
+    setAttachments([])
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault()
+    setDragging(false)
+    void attach(Array.from(e.dataTransfer.files))
+  }
+
   const empty = turns.length === 0 && !pending
 
   return (
-    <div className="chat-view">
+    <div
+      className="chat-view"
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault()
+          setDragging(true)
+        }
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false)
+      }}
+      onDrop={onDrop}
+    >
+      {dragging && (
+        <div className="drop-overlay">
+          <div>
+            <strong>Drop files to attach</strong>
+            <span>CSV, Excel, PDF, Word, PowerPoint, JSON, text</span>
+          </div>
+        </div>
+      )}
       <div className="chat-scroll">
         <div className="chat-col">
-          {empty && <Welcome tools={tools} internet={internet} onSend={onSend} />}
+          {empty && <Welcome tools={tools} internet={internet} onSend={(q) => send(q)} />}
           {turns.map((t, i) => (
             <Message key={i} turn={t} learnable={learnables(t.reply.calls)} savedIds={savedIds} onSave={onSave} />
           ))}
           {pending && (
             <Message
-              turn={{ question: pending.question, reply: { text: pending.text, calls: [], sources: [] } }}
+              turn={{ question: pending.question, attachments: pending.attachments, reply: { text: pending.text, calls: [], sources: [] } }}
               learnable={[]}
               savedIds={savedIds}
               onSave={onSave}
@@ -76,7 +141,17 @@ export function Chat({ turns, pending, tools, internet, onInternet, onSend, lear
           <div ref={endRef} />
         </div>
       </div>
-      <Composer busy={pending !== null} internet={internet} onInternet={onInternet} onSend={onSend} modelLabel={modelLabel} />
+      <Composer
+        busy={pending !== null}
+        reading={reading}
+        attachments={attachments}
+        onRemove={(i) => setAttachments((a) => a.filter((_, j) => j !== i))}
+        onFiles={attach}
+        internet={internet}
+        onInternet={onInternet}
+        onSend={send}
+        modelLabel={modelLabel}
+      />
     </div>
   )
 }
@@ -89,7 +164,7 @@ function Welcome({ tools, internet, onSend }: { tools: Tool[]; internet: boolean
       if (!example || example.includes('\n')) continue
       byCat.set(t.category, [...(byCat.get(t.category) ?? []), example])
     }
-    const ordered = CATEGORY_ORDER.filter((c) => byCat.has(c)).map((c) => [c, byCat.get(c)!.slice(0, 6)] as const)
+    const ordered = orderedCategories(byCat.keys()).map((c) => [c, byCat.get(c)!.slice(0, 6)] as const)
     return [['Lessons & policies', LESSON_PROMPTS] as const, ...ordered]
   }, [tools])
 
@@ -101,7 +176,8 @@ function Welcome({ tools, internet, onSend }: { tools: Tool[]; internet: boolean
     <div className="welcome">
       <div className="hero-mark">✦</div>
       <h1>How can I help today?</h1>
-      <p>Ask a question, run a calculation, look up company data, or learn something new.</p>
+      <p>Ask a question, run a calculation, learn something new, or attach a file and chat with your data.</p>
+      <div className="attach-hint">📎 Drop or attach CSV, Excel, PDF, Word, PowerPoint, JSON or text files, then ask about them.</div>
       <div className="tabs">
         {visible.map(([name]) => (
           <button key={name} type="button" className={name === current[0] ? 'on' : ''} onClick={() => setActive(name)}>
@@ -120,6 +196,25 @@ function Welcome({ tools, internet, onSend }: { tools: Tool[]; internet: boolean
   )
 }
 
+function AttachmentChips({ list, onRemove }: { list: Attachment[]; onRemove?: (i: number) => void }) {
+  return (
+    <div className="file-chips">
+      {list.map((a, i) => (
+        <span key={`${a.name}-${i}`} className={`file-chip ${a.kind}`} title={a.detail}>
+          <span className="file-icon">{a.kind === 'table' ? '▦' : a.kind === 'document' ? '📄' : '⚠'}</span>
+          <span className="file-name">{a.name}</span>
+          <span className="file-detail">{a.kind === 'error' ? a.detail : a.detail.split(';')[0]}</span>
+          {onRemove && (
+            <button type="button" aria-label={`Remove ${a.name}`} onClick={() => onRemove(i)}>
+              ×
+            </button>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function Message({
   turn,
   learnable,
@@ -133,7 +228,7 @@ function Message({
   onSave: (doc: SourceDoc) => void
   streaming?: boolean
 }) {
-  const { question, reply } = turn
+  const { question, reply, attachments } = turn
   const [copied, setCopied] = useState(false)
 
   function copy() {
@@ -145,7 +240,10 @@ function Message({
 
   return (
     <div className="turn">
-      <div className="user-msg">{question}</div>
+      <div className="user-msg">
+        {attachments && attachments.length > 0 && <AttachmentChips list={attachments} />}
+        {question}
+      </div>
       <div className="assistant-msg">
         <div className="avatar">✦</div>
         <div className="assistant-body">
@@ -201,12 +299,20 @@ function Message({
 
 function Composer({
   busy,
+  reading,
+  attachments,
+  onRemove,
+  onFiles,
   internet,
   onInternet,
   onSend,
   modelLabel,
 }: {
   busy: boolean
+  reading: boolean
+  attachments: Attachment[]
+  onRemove: (i: number) => void
+  onFiles: (files: File[]) => void
   internet: boolean
   onInternet: (on: boolean) => void
   onSend: (q: string) => void
@@ -214,6 +320,8 @@ function Composer({
 }) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
+  const hasFiles = attachments.some((a) => a.kind !== 'error')
+  const canSend = !busy && !reading && (text.trim() !== '' || hasFiles)
 
   function resize() {
     const el = ref.current
@@ -223,11 +331,24 @@ function Composer({
   }
 
   function submit() {
-    const q = text.trim()
-    if (!q || busy) return
-    onSend(q)
+    if (!canSend) return
+    onSend(text.trim())
     setText('')
     requestAnimationFrame(resize)
+  }
+
+  function pick(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    onFiles(files)
+  }
+
+  function paste(e: ClipboardEvent) {
+    const files = Array.from(e.clipboardData.files)
+    if (files.length) {
+      e.preventDefault()
+      onFiles(files)
+    }
   }
 
   return (
@@ -239,15 +360,22 @@ function Composer({
           submit()
         }}
       >
+        {(attachments.length > 0 || reading) && (
+          <div className="attach-row">
+            <AttachmentChips list={attachments} onRemove={onRemove} />
+            {reading && <span className="reading">Reading files…</span>}
+          </div>
+        )}
         <textarea
           ref={ref}
           rows={1}
           value={text}
-          placeholder="Message Acme Assistant…"
+          placeholder={hasFiles ? 'Ask about the attached files…' : 'Message Acme Assistant…'}
           onChange={(e) => {
             setText(e.target.value)
             resize()
           }}
+          onPaste={paste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
@@ -256,19 +384,23 @@ function Composer({
           }}
         />
         <div className="composer-row">
+          <label className="chip attach" title="Attach files: CSV, Excel, PDF, Word, PowerPoint, JSON, text">
+            📎 Attach
+            <input type="file" multiple hidden accept={ATTACH_ACCEPT} onChange={pick} />
+          </label>
           <button type="button" className={`chip${internet ? ' on' : ''}`} onClick={() => onInternet(!internet)} title="Lets tools like weather, Wikipedia and exchange rates send your question text to public services">
             🌐 Internet tools {internet ? 'on' : 'off'}
           </button>
           <span className="spacer" />
           <span className="model-note">{modelLabel}</span>
-          <button type="submit" className="send" disabled={busy || !text.trim()} aria-label="Send message">
+          <button type="submit" className="send" disabled={!canSend} aria-label="Send message">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 19V5M5 12l7-7 7 7" />
             </svg>
           </button>
         </div>
       </form>
-      <p className="fineprint">AI can make mistakes. Check important facts, numbers and policies.</p>
+      <p className="fineprint">AI can make mistakes. Check important facts, numbers and policies. Attached files stay on this computer.</p>
     </div>
   )
 }

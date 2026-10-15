@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
 import type { ChangeEvent } from 'react'
 import type { SourceDoc } from '../ai/documents'
-import { ACCEPTED_FILES, downloadMarkdown } from '../ai/ingest'
+import { datasetStore } from '../ai/data'
+import { removeDataset } from '../ai/datasets'
+import { ATTACH_ACCEPT } from '../ai/files'
+import { downloadMarkdown } from '../ai/ingest'
 
 const AREAS: Record<string, string> = {
   erp: 'ERP lessons',
@@ -35,6 +38,7 @@ interface Props {
 
 export function KnowledgeView({ docs, uploadedIds, chunkCount, onUpload, onRemove, onAsk, semantic }: Props) {
   const [query, setQuery] = useState('')
+  const tables = useSyncExternalStore(datasetStore.subscribe, datasetStore.get)
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -63,12 +67,12 @@ export function KnowledgeView({ docs, uploadedIds, chunkCount, onUpload, onRemov
           <h1>Knowledge</h1>
           <p>
             {docs.length} documents ({total} searchable passages): company policies, notes and lessons on ERP, POS, business, finance, IT,
-            networking and general skills. The assistant searches these to answer, and cites what it used.
+            networking and general skills, plus anything you attach in the chat. The assistant searches these to answer, and cites what it used.
           </p>
         </div>
         <label className="btn primary">
           + Upload files
-          <input type="file" accept={ACCEPTED_FILES} multiple hidden onChange={pick} />
+          <input type="file" accept={ATTACH_ACCEPT} multiple hidden onChange={pick} />
         </label>
       </div>
 
@@ -89,6 +93,41 @@ export function KnowledgeView({ docs, uploadedIds, chunkCount, onUpload, onRemov
           </span>
         </label>
       </div>
+
+      {tables.length > 0 && !query.trim() && (
+        <section className="group">
+          <h2>
+            Your tables <span className="count">{tables.length}</span>
+          </h2>
+          <p className="muted">Tables you attached in the chat. The assistant can filter and total them, and their rows are searchable below.</p>
+          <div className="card-grid">
+            {tables.map((t) => (
+              <article key={t.name} className="card">
+                <header>
+                  <strong>{t.name}</strong>
+                  <span className="tag">{t.rows.length} rows</span>
+                </header>
+                <p className="small">{t.headers.join(', ')}</p>
+                <div className="card-actions">
+                  <button type="button" className="btn small" onClick={() => onAsk(`Describe the table ${t.name}`)}>
+                    Ask the assistant
+                  </button>
+                  <button
+                    type="button"
+                    className="btn small danger"
+                    onClick={() => {
+                      removeDataset(t.name)
+                      onRemove(`table-${t.name}`)
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       {groups.length === 0 && <p className="empty">Nothing matches "{query}".</p>}
 
